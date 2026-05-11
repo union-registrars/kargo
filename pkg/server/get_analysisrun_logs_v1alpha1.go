@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -184,13 +185,14 @@ func (s *server) getJobMetric(
 ) (string, *rolloutsapi.JobMetric, error) {
 	jobMetrics := make(map[string]*rolloutsapi.JobMetric)
 	for _, metric := range run.Spec.Metrics {
-		if metric.Provider.Job != nil {
+		jobMetric := getMetricProviderJob(metric.Provider)
+		if jobMetric != nil {
 			if jobMetricName != "" && metric.Name == jobMetricName {
 				// If we know the name of the metric we want, we can return it as soon
 				// as we find it.
-				return jobMetricName, metric.Provider.Job, nil
+				return jobMetricName, jobMetric, nil
 			}
-			jobMetrics[metric.Name] = metric.Provider.Job
+			jobMetrics[metric.Name] = jobMetric
 		}
 	}
 	if jobMetricName != "" {
@@ -226,6 +228,24 @@ func (s *server) getJobMetric(
 		break
 	}
 	return jobMetricName, jobMetric, nil
+}
+
+func getMetricProviderJob(provider rolloutsapi.MetricProvider) *rolloutsapi.JobMetric {
+	if provider.Job != nil {
+		return provider.Job
+	}
+	for _, pluginCfg := range provider.Plugin {
+		var cfg struct {
+			Job *rolloutsapi.JobMetric `json:"job"`
+		}
+		if err := json.Unmarshal(pluginCfg, &cfg); err != nil {
+			continue
+		}
+		if cfg.Job != nil {
+			return cfg.Job
+		}
+	}
+	return nil
 }
 
 // getContainerName confirms the existence of a container in the provided

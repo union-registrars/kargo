@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -68,6 +69,33 @@ func TestServer_getJobMetric(t *testing.T) {
 			},
 		},
 		{
+			name:               "plugin job metric with specified name found",
+			providedMetricName: testMetricName,
+			run: &rolloutsapi.AnalysisRun{
+				Spec: rolloutsapi.AnalysisRunSpec{
+					Metrics: []rolloutsapi.Metric{{
+						Name: testMetricName,
+						Provider: rolloutsapi.MetricProvider{
+							Plugin: map[string]json.RawMessage{
+								"example/job-plugin": []byte(`{"job":{"spec":{"template":{"spec":{"containers":[{"name":"test"}]}}}}}`),
+							},
+						},
+					}},
+				},
+			},
+			assertions: func(
+				t *testing.T,
+				metricName string,
+				metric *rolloutsapi.JobMetric,
+				err error,
+			) {
+				require.NoError(t, err)
+				require.Equal(t, testMetricName, metricName)
+				require.NotNil(t, metric)
+				require.Len(t, metric.Spec.Template.Spec.Containers, 1)
+			},
+		},
+		{
 			name:               "job metric with specified name not found",
 			providedMetricName: testMetricName,
 			run: &rolloutsapi.AnalysisRun{
@@ -82,6 +110,42 @@ func TestServer_getJobMetric(t *testing.T) {
 			},
 			assertions: func(t *testing.T, _ string, _ *rolloutsapi.JobMetric, err error) {
 				require.ErrorContains(t, err, "has no job metric named")
+			},
+		},
+		{
+			name: "plugin metric without job config ignored",
+			run: &rolloutsapi.AnalysisRun{
+				Spec: rolloutsapi.AnalysisRunSpec{
+					Metrics: []rolloutsapi.Metric{{
+						Name: testMetricName,
+						Provider: rolloutsapi.MetricProvider{
+							Plugin: map[string]json.RawMessage{
+								"example/non-job-plugin": []byte(`{"web":{"url":"https://example.com"}}`),
+							},
+						},
+					}},
+				},
+			},
+			assertions: func(t *testing.T, _ string, _ *rolloutsapi.JobMetric, err error) {
+				require.ErrorContains(t, err, "has no job metrics")
+			},
+		},
+		{
+			name: "invalid plugin config ignored",
+			run: &rolloutsapi.AnalysisRun{
+				Spec: rolloutsapi.AnalysisRunSpec{
+					Metrics: []rolloutsapi.Metric{{
+						Name: testMetricName,
+						Provider: rolloutsapi.MetricProvider{
+							Plugin: map[string]json.RawMessage{
+								"example/bad-plugin": []byte(`{`),
+							},
+						},
+					}},
+				},
+			},
+			assertions: func(t *testing.T, _ string, _ *rolloutsapi.JobMetric, err error) {
+				require.ErrorContains(t, err, "has no job metrics")
 			},
 		},
 		{
